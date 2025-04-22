@@ -1,79 +1,126 @@
-from src.table_editor import insert_row_and_column
+import logging
+from typing import Optional, Tuple
+
 from docx import Document
 from docx.table import Table
-from typing import Optional
+
+from src.table_editor import insert_row_and_column
+
+# Constants
+DEFAULT_INPUT_FILE = "example_table.docx"
+DEFAULT_OUTPUT_FILE = "document_row_column_modified.docx"
+USER_PROMPTS = {
+    'insert_row': "➕ Do you want to insert a new row? (y/n/q): ",
+    'row_position': "➡️ At which row position? (1-{}, 'q' to skip): ",
+    'insert_col': "➕ Do you want to insert a column? (y/n/q): ",
+    'col_position': "➡️ At which column position? (1-{}, 'q' to skip): ",
+}
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(message)s')
+logger = logging.getLogger(__name__)
+
+
+def get_user_input(prompt: str, valid_range: Optional[Tuple[int, int]] = None) -> Optional[int]:
+    """
+    Get validated user input.
+    
+    Args:
+        prompt: The input prompt to display
+        valid_range: Optional range of valid numbers (min, max)
+    
+    Returns:
+        The validated input or None if user quits
+    """
+    while True:
+        user_input = input(prompt).strip().lower()
+        
+        if user_input == 'q':
+            return None
+            
+        if not user_input.isdigit():
+            logger.warning("❗ Please enter a valid number or 'q' to quit.")
+            continue
+            
+        num = int(user_input)
+        
+        if valid_range and not (valid_range[0] <= num <= valid_range[1]):
+            logger.warning(f"❗ Please enter a number between {valid_range[0]} and {valid_range[1]}.")
+            continue
+            
+        return num
+
+
+def process_table(table: Table, table_idx: int) -> Tuple[Optional[int], Optional[int]]:
+    """
+    Process a single table to get user input for row/column insertion.
+    
+    Args:
+        table: The table to process
+        table_idx: Index of the table in the document
+    
+    Returns:
+        Tuple of (row_position, column_position) or (None, None)
+    """
+    row_count = len(table.rows)
+    col_count = len(table.columns)
+    
+    logger.info(f"\n📊 [Table {table_idx+1}] Rows: {row_count}, Columns: {col_count}")
+
+    row_pos = None
+    if input(USER_PROMPTS['insert_row']).strip().lower() == 'y':
+        row_pos = get_user_input(
+            USER_PROMPTS['row_position'].format(row_count + 1),
+            (1, row_count + 1)
+        )
+
+    col_pos = None
+    if input(USER_PROMPTS['insert_col']).strip().lower() == 'y':
+        col_pos = get_user_input(
+            USER_PROMPTS['col_position'].format(col_count + 1),
+            (1, col_count + 1)
+        )
+
+    return row_pos, col_pos
 
 
 def main() -> None:
-    # Load the Word document
-    doc: Document = Document("example_table.docx")
-    modified: bool = False  # Track if any changes are made to the document
+    """Main function to process the Word document tables."""
+    try:
+        doc = Document(DEFAULT_INPUT_FILE)
+        
+        if not doc.tables:
+            logger.warning("❗️No tables found in the document.")
+            return
 
-    # Check if the document contains any tables
-    if not doc.tables:
-        print("❗️No tables found in the document.")
-        return
+        logger.info(f"📄 The document contains {len(doc.tables)} table(s).")
+        modified = False
 
-    print(f"📄 The document contains {len(doc.tables)} table(s).")
-
-    # Loop through all tables in the document
-    for t_idx, table in enumerate(doc.tables):
-        row_count: int = len(table.rows)  # Count rows in the current table
-        col_count: int = len(table.columns)  # Count columns in the current table
-        print(f"\n📊 [Table {t_idx+1}] Rows: {row_count}, Columns: {col_count}")
-
-        row_pos: Optional[int] = None
-        # Ask user if they want to insert a row
-        r_answer: str = input("➕ Do you want to insert a new row? (y/n/q): ").strip().lower()
-        if r_answer == 'q':
-            print("👋 Exiting.")
-            break
-        if r_answer == 'y':
-            while True:
-                # Ask for the row position to insert at
-                row: str = input(f"➡️ At which row position? (1-{row_count+1}, 'q' to skip): ").strip().lower()
-                if row == 'q':
-                    break
-                if row.isdigit():
-                    row_num: int = int(row)
-                    if 1 <= row_num <= row_count + 1:
-                        row_pos = row_num  # Store the valid row position
-                        break
-
-        col_pos: Optional[int] = None
-        # Ask user if they want to insert a column
-        c_answer: str = input("➕ Do you want to insert a column? (y/n/q): ").strip().lower()
-        if c_answer == 'q':
-            print("👋 Exiting.")
-            break
-        if c_answer == 'y':
-            while True:
-                # Ask for the column position to insert at
-                col: str = input(f"➡️ At which column position? (1-{col_count+1}, 'q' to skip): ").strip().lower()
-                if col == 'q':
-                    break
-                if col.isdigit():
-                    col_num: int = int(col)
-                    if 1 <= col_num <= col_count + 1:
-                        col_pos = col_num  # Store the valid column position
-                        break
-
-        # If either a row or column position was given, perform insertion
-        if row_pos or col_pos:
+        for idx, table in enumerate(doc.tables):
+            row_pos, col_pos = process_table(table, idx)
+            
+            if row_pos is None and col_pos is None:
+                logger.info("⏭️ Table unchanged.")
+                continue
+                
             if insert_row_and_column(doc, table, row_pos, col_pos):
                 modified = True
-                print(f"✅ Inserted: row {row_pos if row_pos else '-'}, column {col_pos if col_pos else '-'}")
+                logger.info(
+                    f"✅ Inserted: row {row_pos if row_pos else '-'}, "
+                    f"column {col_pos if col_pos else '-'}"
+                )
+
+        if modified:
+            doc.save(DEFAULT_OUTPUT_FILE)
+            logger.info("\n💾 Document saved.")
         else:
-            print("⏭️ Table unchanged.")
+            logger.info("\nℹ️ No changes made.")
 
-    # Save the modified document if any changes were made
-    if modified:
-        doc.save("document_row_column_modified.docx")
-        print("\n💾 Document saved.")
-    else:
-        print("\nℹ️ No changes made.")
+    except FileNotFoundError:
+        logger.error(f"❌ File not found: {DEFAULT_INPUT_FILE}")
+    except Exception as e:
+        logger.error(f"❌ An error occurred: {str(e)}")
 
 
-# Run the main function if the script is executed directly
 if __name__ == "__main__":
     main()
